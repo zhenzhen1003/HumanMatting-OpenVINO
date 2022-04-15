@@ -9,6 +9,8 @@
 using namespace cv;
 using namespace std;
 
+
+
 int main(int argc, char* argv[])
 {
     // Parse command line arguments
@@ -26,6 +28,7 @@ int main(int argc, char* argv[])
 
 
     try {
+
         OpenVINO* openvino = new OpenVINO("./model/FP16/robust.xml");
 
         if (isImage)
@@ -39,7 +42,7 @@ int main(int argc, char* argv[])
         if (isVideo)
         {
             cv::VideoCapture* reader = new cv::VideoCapture(path);
-            openvino->setVideoCapture(reader);
+            openvino->setVideoCapture(reader, path);
             DWORD start_times = GetTickCount();
             openvino->predict();
             DWORD end_times = GetTickCount();

@@ -3,7 +3,8 @@
 
 using namespace std;
 
-const int N = 2;
+//并行推理的流数
+const int N = 4;
 
 OpenVINO::OpenVINO(const std::string& network_xml_filepath)
 {
@@ -20,14 +21,18 @@ OpenVINO::OpenVINO(const std::string& network_xml_filepath)
         auto&  output_info = item.second;
         output_info->setPrecision(InferenceEngine::Precision::FP32);
     }
-    //ie.SetConfig({ { CONFIG_KEY(GPU_THROUGHPUT_STREAMS),std::to_string(N) } }, "GPU");
-    //ie.SetConfig({ { CONFIG_KEY(CPU_THROUGHPUT_STREAMS),std::to_string(N) } }, "CPU");
+    ie.SetConfig({ { CONFIG_KEY(GPU_THROUGHPUT_STREAMS),std::to_string(N) } }, "GPU");
+    ie.SetConfig({ { CONFIG_KEY(CPU_THROUGHPUT_STREAMS),std::to_string(N) } }, "CPU");
 
     executable_network = ie.LoadNetwork(model, device_name);
+
     infer_request = executable_network.CreateInferRequest();
+    infer_request1 = executable_network.CreateInferRequest();
+    infer_request2 = executable_network.CreateInferRequest();
+    infer_request3 = executable_network.CreateInferRequest();
 }
 
-void OpenVINO::setVideoCapture(cv::VideoCapture *reader)
+void OpenVINO::setVideoCapture(cv::VideoCapture *reader, const std::string& path)
 {
     this->reader = reader;
     input_width = this->reader->get(cv::CAP_PROP_FRAME_WIDTH);
@@ -57,49 +62,53 @@ void OpenVINO::preprocess(cv::Mat& image, InferenceEngine::Blob::Ptr& blob)
     }
 }
 
-/*
-void OpenVINO::predict()
-{
-    while (reader->read(curr_frame))
-    {
-        static auto inputBlob = infer_request.GetBlob("src");
-        preprocess(curr_frame, inputBlob);
-
-        infer_request.Infer();
-
-
-        const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request.GetBlob("pha");
-        auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-        auto mdis_pred_holder = mdis_pred->rmap();
-        const float* dis_pred = mdis_pred_holder.as<const float*>();
-
-        int index = 0;
-        unsigned char temp = 0;
-        for (int h = 0; h < 1080; ++h) {
-            for (int w = 0; w < 1920; ++w) {
-                temp = (unsigned char)(dis_pred[index] * 255.0f);
-                alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
-                index++;
-            }
-        }
-        writer->write(alpha);
-    }
-    reader->release();
-    writer->release();
-}
-*/
-
 
 void OpenVINO::predict()
 {
     cv::Mat output;
     cv::Mat input;
+    bool flag1 = false;
+    bool flag2 = false;
+    bool flag3 = false;
     while (reader->read(frame))
     {
+        flag1 = false;
+        flag2 = false;
+        flag3 = false;
         cv::resize(frame, input, cv::Size(1920, 1080));
         static auto inputBlob = infer_request.GetBlob("src");
         preprocess(input, inputBlob);
-        infer_request.Infer();
+        infer_request.StartAsync();
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob1 = infer_request1.GetBlob("src");
+            preprocess(input, inputBlob1);
+            infer_request1.StartAsync();
+            flag1 = true;
+        }
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob2 = infer_request2.GetBlob("src");
+            preprocess(input, inputBlob2);
+            infer_request2.StartAsync();
+            flag2 = true;
+        }
+
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob3 = infer_request3.GetBlob("src");
+            preprocess(input, inputBlob3);
+            infer_request3.StartAsync();
+            flag3 = true;
+        }
+
+        infer_request.Wait();
         const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request.GetBlob("pha");
         auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
         auto mdis_pred_holder = mdis_pred->rmap();
@@ -115,6 +124,66 @@ void OpenVINO::predict()
         }
         cv::resize(alpha, output, cv::Size(input_width, input_height));
         writer->write(output);
+
+        if (flag1)
+        {
+            infer_request1.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob1 = infer_request1.GetBlob("pha");
+            auto mdis_pred1 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob1);
+            auto mdis_pred_holder1 = mdis_pred1->rmap();
+            const float* dis_pred1 = mdis_pred_holder1.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred1[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
+        }
+
+        if (flag2)
+        {
+            infer_request2.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob2 = infer_request2.GetBlob("pha");
+            auto mdis_pred2 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob2);
+            auto mdis_pred_holder2 = mdis_pred2->rmap();
+            const float* dis_pred2 = mdis_pred_holder2.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred2[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
+        }
+
+        if (flag3)
+        {
+            infer_request3.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob3 = infer_request3.GetBlob("pha");
+            auto mdis_pred3 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob3);
+            auto mdis_pred_holder3 = mdis_pred3->rmap();
+            const float* dis_pred3 = mdis_pred_holder3.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred3[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
+        }
     }
     reader->release();
     writer->release();
@@ -149,392 +218,257 @@ void OpenVINO::predict(cv::Mat &image)
 
 
 
-
 /*
 void OpenVINO::predict()
 {
-    int thread_num = N;
-    int k = 0;
-    int i = 0;
-    while (k < frame_num)
+    cv::Mat output;
+    cv::Mat input;
+    bool flag = false;
+    bool flag1 = false;
+    bool flag2 = false;
+    bool flag3 = false;
+    bool flag4 = false;
+    bool flag5 = false;
+    bool flag6 = false;
+    bool flag7 = false;
+    while (reader->read(frame))
     {
-        int cnt = min(thread_num, frame_num - k);
-        for (i = 0; i < cnt; i++)
-        {
-            reader->read(curr_frame);
-            static auto inputBlob = infer_request.at(i).GetBlob("src");
-            preprocess(curr_frame, inputBlob);
-            infer_request.at(i).StartAsync();
-        }
-        for (int j = 0; j < i; j++)
-        {
-            if (InferenceEngine::StatusCode::OK == infer_request.at(j).Wait(InferenceEngine::InferRequest::WaitMode::RESULT_READY))
-            {
-                const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request.at(j).GetBlob("pha");
-                auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-                auto mdis_pred_holder = mdis_pred->rmap();
-                const float* dis_pred = mdis_pred_holder.as<const float*>();
-
-                cout << dis_pred << endl;
-
-                int index = 0;
-                unsigned char temp = 0;
-                for (int h = 0; h < 1080; ++h) {
-                    for (int w = 0; w < 1920; ++w) {
-                        temp = (unsigned char)(dis_pred[index] * 255.0f);
-                        alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
-                        index++;
-                    }
-                }
-            }
-            cv::imshow("frame", alpha);
-            cv::waitKey(1);
-        }
-        k = k + i;
-    }
-}
-*/
-
-
-
-/*
-void OpenVINO::predict()
-{
-    while(reader->read(curr_frame))
-    {
-        DWORD start_times = GetTickCount();
+        flag1 = false;
+        flag2 = false;
+        flag3 = false;
+        flag4 = false;
+        flag5 = false;
+        flag6 = false;
+        flag7 = false;
+        cv::resize(frame, input, cv::Size(1920, 1080));
         static auto inputBlob = infer_request.GetBlob("src");
-        preprocess(curr_frame, inputBlob);
-        infer_request.Infer();
+        preprocess(input, inputBlob);
+        infer_request.StartAsync();
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob1 = infer_request1.GetBlob("src");
+            preprocess(input, inputBlob1);
+            infer_request1.StartAsync();
+            flag1 = true;
+        }
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob2 = infer_request2.GetBlob("src");
+            preprocess(input, inputBlob2);
+            infer_request2.StartAsync();
+            flag2 = true;
+        }
+
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob3 = infer_request3.GetBlob("src");
+            preprocess(input, inputBlob3);
+            infer_request3.StartAsync();
+            flag3 = true;
+        }
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob4 = infer_request4.GetBlob("src");
+            preprocess(input, inputBlob4);
+            infer_request4.StartAsync();
+            flag4 = true;
+        }
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob5 = infer_request5.GetBlob("src");
+            preprocess(input, inputBlob5);
+            infer_request5.StartAsync();
+            flag5 = true;
+        }
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob6 = infer_request6.GetBlob("src");
+            preprocess(input, inputBlob6);
+            infer_request6.StartAsync();
+            flag6 = true;
+        }
+
+        if (reader->read(frame))
+        {
+            cv::resize(frame, input, cv::Size(1920, 1080));
+            static auto inputBlob7 = infer_request7.GetBlob("src");
+            preprocess(input, inputBlob7);
+            infer_request7.StartAsync();
+            flag7 = true;
+        }
+
+        infer_request.Wait();
         const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request.GetBlob("pha");
         auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
         auto mdis_pred_holder = mdis_pred->rmap();
         const float* dis_pred = mdis_pred_holder.as<const float*>();
-
         int index = 0;
+        unsigned char temp = 0;
         for (int h = 0; h < 1080; ++h) {
             for (int w = 0; w < 1920; ++w) {
-                alpha.at<cv::Vec3f>(h, w) = {dis_pred[index], dis_pred[index], dis_pred[index]}; // R,G,B
-                index++; // update STEP times
+                temp = (unsigned char)(dis_pred[index] * 255.0f);
+                alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                index++;
             }
         }
-        DWORD end_times = GetTickCount();
-        cout << "The run time is:" << end_times - start_times << "ms!" << endl;
-    }
-}
-*/
+        cv::resize(alpha, output, cv::Size(input_width, input_height));
+        writer->write(output);
 
-/*
-void OpenVINO::predict()
-{
-    QTime time;
-    while(reader->read(curr_frame))
-    {
-        time.start();
-        static auto inputBlob = infer_request.GetBlob("src");
-        preprocess(curr_frame, inputBlob);
-
-        infer_request.Infer();
-
-
-        const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request.GetBlob("pha");
-        auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-        auto mdis_pred_holder = mdis_pred->rmap();
-        const float* dis_pred = mdis_pred_holder.as<const float*>();
-        int index = 0;
-        for (int h = 0; h < 1080; ++h) {
-            for (int w = 0; w < 1920; ++w) {
-                alpha.at<cv::Vec3f>(h, w) = {dis_pred[index], dis_pred[index], dis_pred[index]}; // R,G,B
-                index++; // update STEP times
-            }
-        }
-        qDebug()<<time.elapsed()/1000.0<<"s";
-    }
-
-
-    //cv::imshow("frame", alpha);
-}
-*/
-
-
-/*
-void OpenVINO::predict()
-{
-    for(int j = 0; j < 16; j++)
-    {
-    QTime time;
-    time.start();
-        //创建任务类对象
-        for(int i = 0; i < 1; i++)
+        if (flag1)
         {
-            reader->read(frame[i]);
-            thread_task.append(new Infer(i));
-            QThreadPool::globalInstance()->start(thread_task.at(i));
-        }
-        while(QThreadPool::globalInstance()->activeThreadCount() != 0)
-        {
-            //qDebug() << QThreadPool::globalInstance()->activeThreadCount();
-        }
-    qDebug()<<time.elapsed()/1000.0<<"s";
-    }
-
-    //while(QThreadPool::globalInstance()->activeThreadCount() != 1)
-    //{
-        //qDebug() << QThreadPool::globalInstance()->activeThreadCount();
-    //}
-    qDebug() << 222;
-}
-*/
-
-
-/*
-void OpenVINO::predict()
-{
-    reader->read(curr_frame);
-    cv::imshow("frame", curr_frame);
-    static auto inputBlob = infer_request_curr->GetBlob(input_names[0]);
-    preprocess(curr_frame, inputBlob);
-    infer_request_curr->StartAsync();
-
-    while(reader->read(curr_frame))
-    {
-        qDebug() << 11;
-        static auto inputBlob = infer_request_next->GetBlob(input_names[0]);
-        preprocess(curr_frame, inputBlob);
-        infer_request_next->StartAsync();
-        if(infer_request_curr->Wait(InferenceEngine::InferRequest::WaitMode::RESULT_READY))
-        {
-            const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request_curr->GetBlob("pha");
-            auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-            auto mdis_pred_holder = mdis_pred->rmap();
-            const float* dis_pred = mdis_pred_holder.as<const float*>();
-
-            //QTime time;
-            //time.start();
-            // reshape
-            int index = 0;
+            infer_request1.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob1 = infer_request1.GetBlob("pha");
+            auto mdis_pred1 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob1);
+            auto mdis_pred_holder1 = mdis_pred1->rmap();
+            const float* dis_pred1 = mdis_pred_holder1.as<const float*>();
+            index = 0;
+            temp = 0;
             for (int h = 0; h < 1080; ++h) {
                 for (int w = 0; w < 1920; ++w) {
-                    alpha.at<cv::Vec3f>(h, w) = {dis_pred[index], dis_pred[index], dis_pred[index]}; // R,G,B
-                    index++; // update STEP times
+                    temp = (unsigned char)(dis_pred1[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
                 }
             }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
         }
-        infer_request_curr.swap(infer_request_next);
-    }
-    cv::imshow("frame", alpha);
-}
-*/
 
-
-
-/*
-void OpenVINO::predict()
-{
-    int thread_num = 4;
-    int k = 0;
-    int i = 0;
-    while(k < frame_num)
-    {
-        int cnt = min(thread_num,frame_num - k);
-        for(i = 0; i < cnt && reader->read(curr_frame); i++)
+        if (flag2)
         {
-            //time.start();
-            static auto inputBlob = asyn_request.at(i)->GetBlob(input_names[0]);
-            preprocess(curr_frame, inputBlob);
-            asyn_request.at(i)->StartAsync();
-            //qDebug()<<time.elapsed()/1000.0<<"s";
-        }
-        for(int j = 0; j < i; j++)
-        {
-            //time.start();
-            if(asyn_request.at(j)->Wait(InferenceEngine::InferRequest::WaitMode::RESULT_READY))
-            {
-                const InferenceEngine::Blob::Ptr dis_pred_blob = asyn_request.at(j)->GetBlob("pha");
-                auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-                auto mdis_pred_holder = mdis_pred->rmap();
-                const float* dis_pred = mdis_pred_holder.as<const float*>();
-
-                int index = 0;
-                for (int h = 0; h < 1080; ++h) {
-                    for (int w = 0; w < 1920; ++w) {
-                        alpha.at<cv::Vec3f>(h, w) = {dis_pred[index], dis_pred[index], dis_pred[index]}; // R,G,B
-                        index++; // update STEP times
-                    }
-                }
-            }
-        }
-        k = k + i;
-    }
-}
-*/
-
-
-
-
-/*
-void OpenVINO::predict()
-{
-    QTime time;
-
-    for(int i = 0; i < 30; i++)
-    {
-        reader->read(curr_frame);
-        //time.start();
-        InferenceEngine::InferRequest::Ptr temp = executable_network.CreateInferRequestPtr();
-        //time.start();
-        static auto inputBlob = temp->GetBlob(input_names[0]);
-        preprocess(curr_frame, inputBlob);
-        temp->StartAsync();
-        asyn_request.enqueue(temp);
-        //qDebug()<<time.elapsed()/1000.0<<"s";
-
-    }
-    int j = 29;
-    while(!asyn_request.empty())
-    {
-        time.start();
-        qDebug() << 11;
-        InferenceEngine::InferRequest::Ptr curr = asyn_request.dequeue();
-        if(curr->Wait(InferenceEngine::InferRequest::WaitMode::RESULT_READY))
-        {
-            const InferenceEngine::Blob::Ptr dis_pred_blob = curr->GetBlob("pha");
-            auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-            auto mdis_pred_holder = mdis_pred->rmap();
-            const float* dis_pred = mdis_pred_holder.as<const float*>();
-
-            int index = 0;
+            infer_request2.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob2 = infer_request2.GetBlob("pha");
+            auto mdis_pred2 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob2);
+            auto mdis_pred_holder2 = mdis_pred2->rmap();
+            const float* dis_pred2 = mdis_pred_holder2.as<const float*>();
+            index = 0;
+            temp = 0;
             for (int h = 0; h < 1080; ++h) {
                 for (int w = 0; w < 1920; ++w) {
-                    alpha.at<cv::Vec3f>(h, w) = {dis_pred[index], dis_pred[index], dis_pred[index]}; // R,G,B
-                    index++; // update STEP times
+                    temp = (unsigned char)(dis_pred2[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
                 }
             }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
         }
-        if(j < frame_num)
+
+        if (flag3)
         {
-            reader->read(curr_frame);
-            //time.start();
-            static auto inputBlob = curr->GetBlob(input_names[0]);
-            preprocess(curr_frame, inputBlob);
-            //qDebug()<<time.elapsed()/1000.0<<"s";
-            curr->StartAsync();
-            asyn_request.enqueue(curr);
-            j++;
+            infer_request3.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob3 = infer_request3.GetBlob("pha");
+            auto mdis_pred3 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob3);
+            auto mdis_pred_holder3 = mdis_pred3->rmap();
+            const float* dis_pred3 = mdis_pred_holder3.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred3[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
+        }
+
+        if (flag4)
+        {
+            infer_request4.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob4 = infer_request4.GetBlob("pha");
+            auto mdis_pred4 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob4);
+            auto mdis_pred_holder4 = mdis_pred4->rmap();
+            const float* dis_pred4 = mdis_pred_holder4.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred4[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
+        }
+
+        if (flag5)
+        {
+            infer_request5.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob5 = infer_request5.GetBlob("pha");
+            auto mdis_pred5 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob5);
+            auto mdis_pred_holder5 = mdis_pred5->rmap();
+            const float* dis_pred5 = mdis_pred_holder5.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred5[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
+        }
+
+        if (flag6)
+        {
+            infer_request6.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob6 = infer_request6.GetBlob("pha");
+            auto mdis_pred6 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob6);
+            auto mdis_pred_holder6 = mdis_pred6->rmap();
+            const float* dis_pred6 = mdis_pred_holder6.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred6[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
+        }
+
+        if (flag7)
+        {
+            infer_request7.Wait();
+            const InferenceEngine::Blob::Ptr dis_pred_blob7 = infer_request7.GetBlob("pha");
+            auto mdis_pred7 = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob7);
+            auto mdis_pred_holder7 = mdis_pred7->rmap();
+            const float* dis_pred7 = mdis_pred_holder7.as<const float*>();
+            index = 0;
+            temp = 0;
+            for (int h = 0; h < 1080; ++h) {
+                for (int w = 0; w < 1920; ++w) {
+                    temp = (unsigned char)(dis_pred7[index] * 255.0f);
+                    alpha.at<cv::Vec3b>(h, w) = { temp, temp, temp }; // R,G,B
+                    index++;
+                }
+            }
+            cv::resize(alpha, output, cv::Size(input_width, input_height));
+            writer->write(output);
         }
     }
-    qDebug()<<time.elapsed()/1000.0<<"s";
+    reader->release();
+    writer->release();
 }
 */
 
 
-/*
-void OpenVINO::predict()
-{
-    reader->read(curr_frame);
-    static auto inputBlob = infer_request_curr->GetBlob(input_names[0]);
-    preprocess(curr_frame, inputBlob);
-
-    infer_request_curr->StartAsync();
-
-    while(reader->read(curr_frame))
-    {
-        qDebug() << 11;
-        static auto inputBlob = infer_request_next->GetBlob(input_names[0]);
-        preprocess(curr_frame, inputBlob);
-        infer_request_next->StartAsync();
-        if(infer_request_curr->Wait(InferenceEngine::InferRequest::WaitMode::RESULT_READY))
-        {
-            const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request_curr->GetBlob("pha");
-            auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-            auto mdis_pred_holder = mdis_pred->rmap();
-            const float* dis_pred = mdis_pred_holder.as<const float*>();
-
-            //QTime time;
-            //time.start();
-            // reshape
-            int index = 0;
-            for (int h = 0; h < 1080; ++h) {
-                for (int w = 0; w < 1920; ++w) {
-                    alpha.at<cv::Vec3f>(h, w) = {dis_pred[index], dis_pred[index], dis_pred[index]}; // R,G,B
-                    index++; // update STEP times
-                }
-            }
-
-            //Find number of pixels.
-            int numberOfPixels = curr_frame.rows * curr_frame.cols * curr_frame.channels();
-
-            //Get floating point pointers to the data matrices
-            uint8_t* fptr = reinterpret_cast<uint8_t*>(curr_frame.data);
-            float* aptr = reinterpret_cast<float*>(alpha.data);
-            uint8_t* outImagePtr = reinterpret_cast<uint8_t*>(out.data);
-
-            //Loop over all pixesl ONCE
-            for(
-              int i = 0;
-              i < numberOfPixels;
-              i++, outImagePtr++, fptr++, aptr++
-            )
-            {
-                *outImagePtr = (*fptr)*(*aptr) + (255)*(1 - *aptr);
-            }
-        }
-        infer_request_curr.swap(infer_request_next);
-    }
-    */
-
-
-
-
-
-    //qDebug()<<time.elapsed()/1000.0<<"s";
-
-    //cv::imshow("frame", out);
-
-
-    /*
-    static auto inputBlob = infer_request_curr->GetBlob(input_names[0]);
-    preprocess(image, inputBlob);
-
-    infer_request_curr->Infer();
-
-
-    const InferenceEngine::Blob::Ptr dis_pred_blob = infer_request_curr->GetBlob("pha");
-    auto mdis_pred = InferenceEngine::as<InferenceEngine::MemoryBlob>(dis_pred_blob);
-    auto mdis_pred_holder = mdis_pred->rmap();
-    const float* dis_pred = mdis_pred_holder.as<const float*>();
-
-    //QTime time;
-    //time.start();
-    // reshape
-    int index = 0;
-    for (int h = 0; h < 1080; ++h) {
-        for (int w = 0; w < 1920; ++w) {
-            alpha.at<cv::Vec3f>(h, w) = {dis_pred[index], dis_pred[index], dis_pred[index]}; // R,G,B
-            index++; // update STEP times
-        }
-    }
-
-    //Find number of pixels.
-    int numberOfPixels = image.rows * image.cols * image.channels();
-
-    //Get floating point pointers to the data matrices
-    uint8_t* fptr = reinterpret_cast<uint8_t*>(image.data);
-    float* aptr = reinterpret_cast<float*>(alpha.data);
-    uint8_t* outImagePtr = reinterpret_cast<uint8_t*>(out.data);
-
-    //Loop over all pixesl ONCE
-    for(
-      int i = 0;
-      i < numberOfPixels;
-      i++, outImagePtr++, fptr++, aptr++
-    )
-    {
-        *outImagePtr = (*fptr)*(*aptr) + (255)*(1 - *aptr);
-    }
-
-    //qDebug()<<time.elapsed()/1000.0<<"s";
-
-    //cv::imshow("frame", out);
-    */
-//}
